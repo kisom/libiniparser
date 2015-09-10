@@ -1,0 +1,10 @@
+sudo: false
+language: c
+compiler:
+  - clang
+  - gcc
+addons:
+  apt:
+    packages:
+      - texinfo
+script: autoreconf -i && ./configure && make && make check

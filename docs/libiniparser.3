@@ -1,0 +1,285 @@
+.Dd Sep 9, 2015
+.Dt LIBINIPARSER 3
+.Os
+.Sh NAME
+.Nm libiniparser
+.Nd simple parser for .ini files
+.Sh SYNOPSIS
+.In stdint.h
+.In iniparser/iniparser.h
+.Ft int
+.Fo iniparser_init
+.Fa void
+.Fc
+.Ft void
+.Fo iniparser_destroy
+.Fa void
+.Fc
+.Ft int
+.Fo iniparser_open
+.Fa "const char *path"
+.Fa "iniparser_file_s **file"
+.Fc
+.Ft int
+.Fo iniparser_close
+.Fa "iniparser_file_s *file"
+.Fc
+.Ft int
+.Fo iniparser_readline
+.Fa "iniparser_file_s *file"
+.Fa "inipaser_line_s *line"
+.Fc
+.Ft void
+.Fo iniparser_line_init
+.Fa "iniparser_line_s *line"
+.Fc
+.Ft void
+.Fo iniparser_line_destroy
+.Fa "iniparser_line_s *line"
+.Fc
+.Sh DESCRIPTION
+.Nm
+is a parsing library for .ini files. An ini file is of the form
+.Bd -literal
+[ section1 ]
+keyA = valueA
+keyB = valueB
+
+[ section2 ]
+keyA = valueA
+keyB = valueB
+keyC =
+.Ed
+.Ss OVERVIEW
+The library is initialised with
+.Nm iniparser_init ,
+which will
+.Sy must
+be called before using the library. When no longer needed, the
+.Nm libparser_destroy
+function should be called to free resources.
+Configuration files are represented by the
+.Nm iniparser_file_s structure, which is defined as
+.Bd -literal
+typedef struct {
+	FILE	*source;
+	char	*lineptr;
+	size_t	 linelen;
+	ssize_t	 readlen;
+} iniparser_file_s;
+.Ed
+.Pp
+A configuration file may be opened with
+.Nm iniparser_open ,
+which if given a pointer to a NULL pointer to an
+.Nm iniparser_file_s ,
+will allocate space using
+.Xr calloc 3 .
+The caller must be sure then to free this memory when it is no longer
+needed. Callers may also explicitly set the
+.Ic source
+pointer to the appropriate source file handle, and ensure that the
+other fields are at zero values. Similarly,
+.Nm iniparser_close
+will close the source file handle and free any memory allocated inside
+the structure. Users should still ensure that the structure itself is
+freed as required.
+.Nm iniparser_readline
+will attempt to fill in the results of parsing the next line in the
+configuration file. Note that it will keep reading lines, skipping
+comments and blank lines, until it reads a valid section or key-value
+line or until it encounters an error. The
+.Nm iniparser_line_s
+structure is defined as
+.Bd -literal
+typedef struct {
+	uint8_t	 is_section;
+	uint8_t	 is_set;
+	char	*name;
+	char	*value;
+} iniparser_line_s;
+.Ed
+.Pp
+A line should be initialised before first use with
+.Nm iniparser_line_init ,
+and should be destroyed after last use with
+.Nm iniparser_line_destroy .
+The fields are defined as:
+.Bl -bullet -width Ds
+.It
+The is_section field will be set to 1 if the line was a new section.
+.It
+The is_set field will be set to 1 if valid data was set. This is
+useful when an EOF is reached.
+.It
+The name field contains the section name if the is_section field is 1,
+or the key if is_section is 0 and is_set is 1. It should be
+disregarded outside of these two cases.
+.It
+The value field contains the key's value if is_section is 0 and is_set
+is 1. It should be disregarded otherwise. If it is NULL, the key had
+no value.
+.El
+Both the name and value field will have leading and trailing spaces
+stripped. The line that is passed in is reset and its memory freed
+every time
+.Nm iniparser_readline
+is run. Callers should copy any relevant data from the line elsewhere.
+.Ss TYPICAL USAGE
+Processing a file
+generally follows the following steps:
+.Bl -bullet
+.It
+Call
+.Nm iniparser_open
+with the path to the ini file and a pointer to an
+.Nm iniparser_file_s
+structure that will be used to manage the file parsing.
+.It
+Prepare the line storage variable with
+.Nm iniparser_line_init .
+.It
+Call
+.Nm iniparser_readline
+to obtain successive values of the file.
+.It
+While iniparser_readline continues to succeed, keep processing the
+results.
+.It
+Clean up with the following sequence:
+.Bl -enum
+.It
+.Nm iniparser_line_destroy
+.It
+.Nm iniparser_close
+.It
+If the parser is no longer needed,
+.Nm iniparser_destroy .
+Once this is called, the library cannot be used until
+.Nm iniparser_init
+is called again.
+.El
+.El
+.Ss THE REGULAR EXPRESSIONS
+The following regular expressions are used:
+.Bl -tag -width Ds
+.It sections
+"^\\[ *([a-zA-Z0-9_-]+) *\\]$"
+.It blank lines
+"^[ \t]*$"
+.It comments
+"^[ \t]*[#;]"
+.It key-value lines
+"^[ \t]*([a-zA-Z0-9_-]+)[ \t]*=(.*)$"
+.El
+.Sh RETURN VALUES
+.Nm iniparser_init ,
+.Nm iniparser_open ,
+and
+.Nm iniparser_readline
+all return 0 on success and -1 on failure. Additionally,
+.Nm iniparser_readline
+uses 1 to signal EOF; the line value should be checked to determine if
+there is new data and the file closed.
+.Sh EXAMPLES
+The following program will parse the files specified on the command
+line and print sections and key/value pairs.
+.Bd -literal
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "iniparser/iniparser.h"
+
+
+int
+main(int argc, char *argv[])
+{
+	iniparser_file_s	*file = NULL;
+	iniparser_line_s	 line;
+	int			 i;
+	int			 ret;
+
+	ret = iniparser_init();
+	if (0 != ret) {
+		fprintf(stderr, "init failed: %d\n", ret);
+		goto exit;
+	}
+
+	argc--;
+	argv++;
+
+	for (i = 0; i < argc; i++) {
+		printf("Processing %s\n", argv[i]);
+		ret = iniparser_open(argv[i], &file);
+		if (0 != ret) {
+			perror("_open");
+			fprintf(stderr, "retval: %d\n", ret);
+			goto exit;
+		}
+		iniparser_line_init(&line);
+
+		while (1) {
+			ret = iniparser_readline(file, &line);
+			/* -1 is returned on error. */
+			if (-1 == ret) {
+				perror("_readline");
+				fprintf(stderr, "retval: %d\n", ret);
+				goto exit;
+			}
+			/* 1 means EOF. */
+			else if (1 == ret) {
+				ret = 0;
+				break;
+			}
+
+			if (line.is_section) {
+				printf("Now in section '%s'\n", line.name);
+			}
+			else {
+				printf("Read key '%s' with value '%s'\n",
+				    line.name, line.value);
+			}
+
+			iniparser_line_destroy(&line);		
+		}
+
+		iniparser_close(file);
+		free(file);
+		file = NULL;
+		iniparser_line_destroy(&line);		
+	}
+
+exit:
+	iniparser_line_destroy(&line);	
+	if (argc > 0) {
+		iniparser_destroy();
+	}
+
+	return ret==0;
+}
+.Ed
+.Sh ERRORS
+.Nm iniparser_open
+will fail if its
+.Ic file
+argument is NULL, the call to
+.Xr calloc 3
+fails, or the source file could not be opened. Note that in the case
+where memory is allocated by the library, it will be freed on exit.
+.Pp
+.Nm iniparser_close
+returns the exit value of the call to
+.Xr fclose 3 .
+.Pp
+.Nm iniparser_readline
+will fail if there are any improperly formatted lines; comments and
+blank lines will be skipped. It will also fail if it fails to read
+a line from the file.
+.Sh AUTHORS
+.Nm
+was written by
+.An Kyle Isom Aq Mt kyle@tyrfingr.is .
+.Sh LICENSE
+.Nm
+is released under the MIT license.

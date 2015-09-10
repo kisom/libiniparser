@@ -1,0 +1,324 @@
+\input texinfo   @c -*-texinfo-*-
+@comment $Id: GNU-Sample-Texts.html,v 1.7 2008/09/19 15:44:59 karl Exp $
+@comment %**start of header
+@setfilename libiniparser.info
+@include version.texi
+@settitle libiniparser @value{VERSION}
+@syncodeindex pg cp
+@comment %**end of header
+@copying
+This manual is for libiniparser, a library for parsing ini-style
+configuration files.
+
+Copyright @copyright{} 2013 Kyle Isom <@email{kyle@@tyrfingr.is}>
+
+@quotation
+This document is released into the public domain.
+@end quotation
+@end copying
+
+@dircategory Texinfo documentation system
+@direntry
+* introduction: (intro)Introduction to libiniparser
+@end direntry
+
+@titlepage
+@title libiniparser
+@subtitle for version @value{VERSION}, @value{UPDATED}
+@author Kyle Isom (@email{kyle@@tyrfingr.is})
+@page
+@vskip 0pt plus 1filll
+@paragraphindent 0
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top libiniparser
+
+This manual is for libiniparser (version @value{VERSION}, @value{UPDATED}).
+@end ifnottex
+
+@menu
+* A Quick Introduction::
+* File Syntax::
+* API Reference::
+* Building and Installation::
+* Obtaining the Source::
+@end menu
+
+@paragraphindent 0
+
+@node A Quick Introduction
+@chapter A Quick Introduction
+
+@code{libiniparser} is a library for parsing ini-style configuration
+files.
+
+The following example program shows reading a configuration file and
+printing the sections and values:
+
+@smallexample
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "iniparser/iniparser.h"
+
+
+int
+main(int argc, char *argv[])
+@{
+        iniparser_file_s        *file = NULL;
+        iniparser_line_s         line;
+        int                         i;
+        int                         ret;
+
+        ret = iniparser_init();
+        if (0 != ret) @{
+                fprintf(stderr, "init failed: %d\n", ret);
+                goto exit;
+        @}
+
+        argc--;
+        argv++;
+
+        for (i = 0; i < argc; i++) @{
+                printf("Processing %s\n", argv[i]);
+                ret = iniparser_open(argv[i], &file);
+                if (0 != ret) @{
+                        perror("_open");
+                        fprintf(stderr, "retval: %d\n", ret);
+                        goto exit;
+                @}
+                iniparser_line_init(&line);
+
+                while (1) @{
+                        ret = iniparser_readline(file, &line);
+                        /* -1 is returned on error. */
+                        if (-1 == ret) @{
+                                perror("_readline");
+                                fprintf(stderr, "retval: %d\n", ret);
+                                goto exit;
+                        @}
+                        /* 1 means EOF. */
+                        else if (1 == ret) @{
+                                ret = 0;
+                                break;
+                        @}
+
+                        if (line.is_section) @{
+                                printf("Now in section '%s'\n", line.name);
+                        @}
+                        else @{
+                                printf("Read key '%s' with value '%s'\n",
+                                    line.name, line.value);
+                        @}
+
+                        iniparser_line_destroy(&line);                
+                @}
+
+                iniparser_close(file);
+                free(file);
+                file = NULL;
+                iniparser_line_destroy(&line);                
+        @}
+
+exit:
+        iniparser_line_destroy(&line);        
+        if (argc > 0) @{
+                iniparser_destroy();
+        @}
+
+        return ret==0;
+@}
+@end smallexample
+
+@node File Syntax
+@chapter File Syntax
+
+The following syntax rules govern parsing:
+
+@enumerate
+
+@item
+A section consists of a string inside a pair of square braces. There
+may be whitespace between the the braces and the section name.
+
+@item
+Section names may consist of alphanumeric characters, underscores, and
+dashes.
+
+@item
+Comments are delineated by lines beginning with an octothorpe or a
+semicolon. There may be whitespace before the line.
+
+@item
+Blank lines are skipped.
+
+@item
+Keys should be of the form key = value. There may be any amount of
+whitespace around keys and values; this whitespace will be stripped.
+
+@item
+Keys follow the same naming rules as section names.
+
+@item
+Values may have any characters in them, but they may not span lines.
+
+@end enumerate
+
+Many of the systemd unit files served as test fodder for this library;
+they are a good example of a well-formed file.
+
+@node API Reference
+@chapter API Reference
+
+@section iniparser_init
+@deftypefn {Global Function} int iniparser_init (void)
+
+Initialise the library; this @strong{must} be called before calling
+any of the other functions in this package. This function is not
+reentrant; there are global parser objects that are set up by this
+function. This returns 0 on success and -1 on failure.
+@end deftypefn
+
+@section iniparser_destroy
+@deftypefn {Global Function} void iniparser_destroy (void)
+
+Frees any memory used by the parser. It should be called only when the
+library is no longer needed; after calling this function, the
+@code{iniparser_init} must be called before any other function.  As it
+modifies global parser objects, it is not reentrant.
+@end deftypefn
+
+@section iniparser_open
+@deftypefn {File Function} int iniparser_open @
+           (const char *path, iniparser_file_s **file)
+
+Open the configuration file speciffied by @var{path}. If @var{file}
+points to a NULL pointer, memory will be allocated for the file; this
+memory must be freed by the caller after a call to
+@code{iniparser_close}. This returns 0 on success and -1 on
+failure. The @code{iniparser_file_s} pointed to by this is defined as
+@verbatim
+typedef struct {
+	FILE	*source;
+	char	*lineptr;
+	size_t	 linelen;
+	ssize_t	 readlen;
+} iniparser_file_s;
+@end verbatim
+It may be constructed by hand, as long as the
+@var{lineptr}. @var{linelen}, and @var{readlen} fields are set to NULL
+and 0.
+@end deftypefn
+
+@section iniparser_close
+@deftypefn {File Function} int iniparser_close @
+           (iniparser_file_s *file)
+
+Close the file pointed to by the @var{source} field and free any
+memory in use by the structure. This returns 0 on success and -1 on
+failure; the return value is the result of calling @code{fclose(3)} on
+the file stream after any memory used is freed.
+@end deftypefn
+
+
+@section iniparser_readline
+@deftypefn {File, Line Function} int iniparser_readline @
+           (iniparser_file_s *file, iniparser_line_s *line);
+
+@code{iniparser_readline} will attempt to fill in the results of
+parsing the next line in the configuration file. Note that it will
+keep reading lines, skipping comments and blank lines, until it reads
+a valid section or key-value line or until it encounters an error.
+This returns 0 on success, -1 on failure, and 1 on EOF. The
+@code{iniparser_line_s} structure is defined as
+@verbatim
+typedef struct {
+	uint8_t	 is_section;
+	uint8_t	 is_set;
+	char	*name;
+	char	*value;
+} iniparser_line_s;
+@end verbatim
+
+The fields in a @code{iniparser_line_s} are
+@itemize
+
+@item
+The @code{is_section} field will be set to 1 if the line was a new
+section.
+
+@item
+The @code{is_set} field will be set to 1 if valid data was set. This
+is useful when an EOF is reached. If this is 0, the @code{name} and
+@code{value} fields are not relevant.
+
+@item
+The @code{name} field contains the section name if the
+@code{is_section} field is 1, or the key if @code{is_section}. It
+should be disregarded outside of these two cases.
+
+@item
+The @code{value} field contains the key's value if @code{is_section}
+is 0 and @code{is_set} is 1. It should be disregarded otherwise. If it
+is NULL, the key had no value.
+@end itemize
+@strong{Note}: at the beginning of a call to
+@code{iniparser_readline}, the memory in @code{line} is freed
+(internally, it calls @code{iniparser_line_destroy}). The fields in
+this structure should be copied out if they are needed for later use.
+@end deftypefn
+
+@section iniparser_line_init
+@deftypefn {Line Function} void	iniparser_line_init @
+           (iniparser_line_s *line)
+
+Initialise the line, ensuring that it is properly zeroised. This should be
+called before the first call to @code{iniparser_readline}.
+@end deftypefn
+
+@section iniparser_line_destroy
+@deftypefn {Line Function} void iniparser_line_destroy @
+         (iniparser_line_s *line)
+
+Clear any memory used by an @code{iniparser_line_s} structure.
+@end deftypefn
+
+
+@node Building and Installation
+@chapter Building and Installation
+
+This program uses @code{autoconf} and @code{automake} as its build
+system. The provided @code{autobuild.sh} script will call all the
+necessary automake tools to build the software. Otherwise, the
+standard
+
+@example
+./configure && make
+sudo make install
+@end example
+
+dance will build and install this library once the @code{configure}
+script is generated.
+
+The tests may be run using @code{make check}.
+
+
+@node Obtaining the Source
+@chapter Obtaining the Source
+
+Code snapshots are provided via the @uref{http://git.zx2c4.com/cgit/,
+cgit} interface at the source site. The current snapshot is
+@uref{https://git.kyleisom.net/lib/libiniparser/snapshot/libiniparser-@value{VERSION}.tar.gz, @value{VERSION}}.
+
+The primary git site for the project is
+@uref{https://git.kyleisom.net/lib/libiniparser/, my Git site}; a
+@uref{https://github.com/kisom/libiniparser/, Github mirror} is also available.
+
+
+@bye
