@@ -8,5 +8,5 @@ addons:
     packages:
       - texinfo
 script: 
-  - sed -i '' -e 's/1.14/1.11/' configure.ac
+  - sed -i -e 's/1.14/1.11/' configure.ac
   - ([ -d m4 ] || mkdir m4) && autoreconf -i && ./configure && make && make check
