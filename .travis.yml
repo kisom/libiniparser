@@ -7,4 +7,4 @@ addons:
   apt:
     packages:
       - texinfo
-script: autoreconf -i && ./configure && make && make check
+script: ([ -d m4 ] || mkdir m4) && autoreconf -i && ./configure && make && make check
